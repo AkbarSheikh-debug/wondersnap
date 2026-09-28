@@ -12,7 +12,7 @@
     "test:report": "playwright show-report"
   },
   "keywords": ["mediapipe", "webgl2", "particles", "hand-tracking", "gestures"],
-  "license": "ISC",
+  "license": "MIT",
   "dependencies": {
     "@mediapipe/tasks-vision": "^1.0.1"
   },

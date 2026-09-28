@@ -148,3 +148,7 @@ tests/                     Playwright specs
 - **Hand tracking never loads:** run `npm install` first; the tracking runtime is served from `node_modules`.
 - **Low frame rate:** try `http://localhost:5173/?n=100000&dpr=1`.
 - **Port already in use:** `npm start -- 8080` and open `http://localhost:8080`.
+
+## License
+
+[MIT](LICENSE) © 2026 Akbar Sheikh
