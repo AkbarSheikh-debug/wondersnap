@@ -1,0 +1,22 @@
+{
+  "name": "wondersnap",
+  "version": "1.0.0",
+  "description": "Gesture-controlled 3D wonders, engines and cars made of glowing GPU particles (MediaPipe + WebGL2).",
+  "type": "module",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "test": "playwright test",
+    "test:report": "playwright show-report"
+  },
+  "keywords": ["mediapipe", "webgl2", "particles", "hand-tracking", "gestures"],
+  "license": "ISC",
+  "dependencies": {
+    "@mediapipe/tasks-vision": "^1.0.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
+  }
+}
