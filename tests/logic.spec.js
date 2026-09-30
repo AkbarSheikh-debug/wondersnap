@@ -27,6 +27,197 @@ test('gestures: poses at 4 rotations, peace sign, openness, debouncer', async ({
   expect(r.peaceChanges).toEqual([false, false, false, false, false, true, false]);   // ✌ must be held 6 frames
 });
 
+test('static gesture profiles preserve defaults and recognize only intended marginal poses', async ({ page }) => {
+  const r = await page.evaluate(async () => {
+    const G = await import('/src/logic/gestures.js');
+    const { hand } = await import('/src/logic/synth.js');
+    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const clone = (lm) => lm.map((p) => [...p]);
+    const placeAtDistance = (lm, index, origin, distance) => {
+      const q = clone(lm), a = q[origin], p = q[index], n = Math.max(dist(p, a), 1e-9);
+      q[index] = [a[0] + ((p[0] - a[0]) * distance) / n, a[1] + ((p[1] - a[1]) * distance) / n];
+      return q;
+    };
+    const fingerRatio = (lm, tip, joint, ratio) => placeAtDistance(lm, tip, G.WRIST, dist(lm[joint], lm[G.WRIST]) * ratio);
+    const thumbRatio = (lm, ratio) => placeAtDistance(lm, G.THUMB_TIP, 17, G.handScale(lm) * ratio);
+    const shape = (pose, extended, curled, thumb) => {
+      let lm = hand({ pose });
+      for (const i of extended) lm = fingerRatio(lm, G.TIPS[i], G.PIPS[i], 1.135);
+      for (const i of curled) lm = fingerRatio(lm, G.TIPS[i], G.MCPS[i], 1.265);
+      if (thumb) lm = thumbRatio(lm, 1.085);
+      return lm;
+    };
+    const marginal = {
+      open: shape('open', [0, 1, 2, 3], [], true),
+      fist: shape('fist', [], [0, 1, 2, 3], false),
+      point: shape('point', [0], [1, 2, 3], false),
+      peace: shape('peace', [0, 1], [2, 3], false),
+    };
+
+    // These local copies lock down the exact pre-profile behavior of omitted arguments.
+    const legacyClassify = (lm) => {
+      if (!lm) return G.NONE;
+      const ext = G.TIPS.map((tip, i) => dist(lm[tip], lm[G.WRIST]) > dist(lm[G.PIPS[i]], lm[G.WRIST]) * 1.15);
+      const curled = G.TIPS.map((tip, i) => dist(lm[tip], lm[G.WRIST]) < dist(lm[G.MCPS[i]], lm[G.WRIST]) * 1.25);
+      const thumbOut = dist(lm[G.THUMB_TIP], lm[17]) > G.handScale(lm) * 1.1;
+      if (ext.every(Boolean) && thumbOut) return G.OPEN;
+      if (curled.every(Boolean)) return G.FIST;
+      if (ext[0] && ext[1] && curled[2] && curled[3]) return G.PEACE;
+      if (ext[0] && curled[1] && curled[2] && curled[3]) return G.POINT;
+      return G.OTHER;
+    };
+    const clamp01 = (x) => Math.min(1, Math.max(0, x));
+    const legacyOpenness = (lm) => {
+      if (!lm) return 0;
+      let fingers = 0;
+      for (let i = 0; i < 4; i++) {
+        const ratio = dist(lm[G.TIPS[i]], lm[G.WRIST]) / Math.max(dist(lm[G.MCPS[i]], lm[G.WRIST]), 1e-6);
+        fingers += clamp01((ratio - 1.05) / (1.75 - 1.05));
+      }
+      const thumb = clamp01((dist(lm[G.THUMB_TIP], lm[17]) / G.handScale(lm) - 0.9) / (1.55 - 0.9));
+      return 0.8 * (fingers / 4) + 0.2 * thumb;
+    };
+    const corpus = [null, ...['open', 'fist', 'point', 'peace', 'pinch', 'snap_pressed', 'snap_released'].map((pose) => hand({ pose })),
+      ...Array.from({ length: 21 }, (_, i) => hand({ pose: 'partial', f: i / 20 }))];
+    const canonical = ['open', 'fist', 'point', 'peace'].map((pose) => hand({ pose }));
+    const partial = Array.from({ length: 21 }, (_, i) => hand({ pose: 'partial', f: i / 20 }));
+    const opennessSample = (finger, thumb) => {
+      let lm = hand({ pose: 'open' });
+      for (let i = 0; i < 4; i++) lm = fingerRatio(lm, G.TIPS[i], G.MCPS[i], finger);
+      return thumbRatio(lm, thumb);
+    };
+    const looseClosed = opennessSample(1.065, 0.915);
+    const nearlyOpen = opennessSample(1.735, 1.535);
+
+    return {
+      values: { standard: G.STANDARD, forgiving: G.FORGIVING },
+      frozen: [G.STANDARD, G.FORGIVING, G.GESTURE_PROFILES].map(Object.isFrozen),
+      legacyClassify: corpus.map((lm) => [legacyClassify(lm), G.classify(lm), G.classify(lm, G.STANDARD)]),
+      legacyOpenness: corpus.map((lm) => [legacyOpenness(lm), G.openness(lm), G.openness(lm, G.STANDARD)]),
+      canonical: {
+        standard: canonical.map((lm) => G.classify(lm, G.STANDARD)),
+        forgiving: canonical.map((lm) => G.classify(lm, G.FORGIVING)),
+      },
+      marginal: Object.fromEntries(Object.entries(marginal).map(([name, lm]) => [name, [G.classify(lm, G.STANDARD), G.classify(lm, G.FORGIVING)]])),
+      marginalFistPinched: G.pinched(marginal.fist),
+      ambiguous: [0.45, 0.5, 0.55].map((f) => [G.classify(hand({ pose: 'partial', f }), G.STANDARD), G.classify(hand({ pose: 'partial', f }), G.FORGIVING)]),
+      safetyPoses: ['pinch', 'snap_pressed', 'snap_released', 'fist', 'open'].map((pose) => {
+        const lm = hand({ pose });
+        return [pose, G.classify(lm, G.STANDARD), G.classify(lm, G.FORGIVING)];
+      }),
+      partialSafety: [0, 0.25, 0.35, 0.4, 0.45, 0.5, 0.55, 0.6, 0.65, 0.75, 1].map((f) => {
+        const lm = hand({ pose: 'partial', f });
+        return [f, G.classify(lm, G.STANDARD), G.classify(lm, G.FORGIVING)];
+      }),
+      curves: {
+        standard: partial.map((lm) => G.openness(lm, G.STANDARD)),
+        forgiving: partial.map((lm) => G.openness(lm, G.FORGIVING)),
+      },
+      interpretation: {
+        looseClosed: [G.openness(looseClosed, G.STANDARD), G.openness(looseClosed, G.FORGIVING)],
+        nearlyOpen: [G.openness(nearlyOpen, G.STANDARD), G.openness(nearlyOpen, G.FORGIVING)],
+      },
+    };
+  });
+
+  expect(r.values.standard).toEqual({ extendedFingerRatio: 1.15, curledFingerRatio: 1.25, openThumbRatio: 1.1,
+    opennessFingerClosed: 1.05, opennessFingerOpen: 1.75, opennessThumbClosed: 0.9, opennessThumbOpen: 1.55 });
+  expect(r.values.forgiving).toEqual({ extendedFingerRatio: 1.12, curledFingerRatio: 1.28, openThumbRatio: 1.07,
+    opennessFingerClosed: 1.08, opennessFingerOpen: 1.72, opennessThumbClosed: 0.93, opennessThumbOpen: 1.52 });
+  expect(r.frozen).toEqual([true, true, true]);
+  for (const row of r.legacyClassify) expect(row[1]).toBe(row[0]);
+  for (const row of r.legacyClassify) expect(row[2]).toBe(row[0]);
+  for (const row of r.legacyOpenness) expect(row[1]).toBe(row[0]);
+  for (const row of r.legacyOpenness) expect(row[2]).toBe(row[0]);
+  expect(r.canonical.standard).toEqual(['open', 'fist', 'point', 'peace']);
+  expect(r.canonical.forgiving).toEqual(['open', 'fist', 'point', 'peace']);
+  expect(r.marginal).toEqual({ open: ['other', 'open'], fist: ['other', 'fist'], point: ['other', 'point'], peace: ['other', 'peace'] });
+  expect(r.marginalFistPinched).toBe(false);
+  expect(r.ambiguous).toEqual([['other', 'other'], ['other', 'other'], ['other', 'other']]);
+  expect(r.safetyPoses).toEqual([
+    ['pinch', 'other', 'other'], ['snap_pressed', 'point', 'point'], ['snap_released', 'point', 'point'],
+    ['fist', 'fist', 'fist'], ['open', 'open', 'open'],
+  ]);
+  expect(r.partialSafety).toEqual([
+    [0, 'fist', 'fist'], [0.25, 'fist', 'fist'], [0.35, 'fist', 'fist'],
+    [0.4, 'other', 'other'], [0.45, 'other', 'other'], [0.5, 'other', 'other'],
+    [0.55, 'other', 'other'], [0.6, 'other', 'other'], [0.65, 'other', 'open'],
+    [0.75, 'open', 'open'], [1, 'open', 'open'],
+  ]);
+  for (const curve of Object.values(r.curves)) {
+    expect(curve[0]).toBeLessThan(0.05); expect(curve.at(-1)).toBeGreaterThan(0.95);
+    for (let i = 1; i < curve.length; i++) expect(curve[i]).toBeGreaterThanOrEqual(curve[i - 1]);
+  }
+  expect(r.interpretation.looseClosed[0]).toBeGreaterThan(0);
+  expect(r.interpretation.looseClosed[1]).toBe(0);
+  expect(r.interpretation.nearlyOpen[0]).toBeLessThan(1);
+  expect(r.interpretation.nearlyOpen[1]).toBe(1);
+});
+
+test('controller bounds presets while pinch and snap remain Standard-only', async ({ page }) => {
+  const r = await page.evaluate(async () => {
+    const G = await import('/src/logic/gestures.js');
+    const { Controller } = await import('/src/logic/controller.js');
+    const { hand } = await import('/src/logic/synth.js');
+    const rep = (lm, n) => Array(n).fill(lm);
+    const runSnap = (preset, seq) => {
+      const c = new Controller(4); c.setGestureSensitivity(preset);
+      let t = 0, fires = 0;
+      for (const lm of seq) { fires += c.onHand(lm, t) ? 1 : 0; t += 1 / 30; }
+      return fires;
+    };
+    const pinchTrace = (preset) => {
+      const c = new Controller(4); c.setGestureSensitivity(preset);
+      return rep(hand({ pose: 'pinch' }), 4).map((lm, i) => { c.onHand(lm, i / 30); return [c.pinch, c.pinchStart]; });
+    };
+    const dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const marginalFist = G.TIPS.reduce((lm, tip, i) => {
+      const q = lm.map((p) => [...p]), wrist = q[G.WRIST], p = q[tip];
+      const target = dist(q[G.MCPS[i]], wrist) * 1.265, current = Math.max(dist(p, wrist), 1e-9);
+      q[tip] = [wrist[0] + ((p[0] - wrist[0]) * target) / current, wrist[1] + ((p[1] - wrist[1]) * target) / current];
+      return q;
+    }, hand({ pose: 'fist' }));
+    const marginalFistTrace = (preset) => {
+      const c = new Controller(4); c.setGestureSensitivity(preset);
+      for (let i = 0; i < 8; i++) c.onHand(marginalFist, i / 30);
+      return [c.rawPose, c.pose, c.pinch, c.pinchStart];
+    };
+    const P = hand({ pose: 'snap_pressed' }), R = hand({ pose: 'snap_released' });
+    const F = hand({ pose: 'fist' }), O = hand({ pose: 'open' });
+    const lerp = (a, b, k) => a.map((p, i) => [p[0] + (b[i][0] - p[0]) * k, p[1] + (b[i][1] - p[1]) * k]);
+    const sequences = {
+      clean: [...rep(P, 5), ...rep(R, 3)],
+      fistOpen: [...rep(F, 6), ...rep(O, 4)],
+      fistOpenBlur: [...rep(F, 6), lerp(F, O, 0.5), O, O],
+    };
+    const snap = Object.fromEntries(['standard', 'forgiving'].map((preset) => [preset,
+      Object.fromEntries(Object.entries(sequences).map(([name, seq]) => [name, runSnap(preset, seq)]))]));
+    const def = new Controller(4);
+    def.onHand(O, 0);
+    const selected = [def.gestureSensitivity, def.gestureProfile === G.STANDARD, def.rawPose, def.openness];
+    const accepted = def.setGestureSensitivity('forgiving');
+    const rejected = def.setGestureSensitivity('custom');
+    return {
+      selected, accepted, rejected,
+      reset: [def.gestureSensitivity, def.gestureProfile === G.STANDARD],
+      pinch: { standard: pinchTrace('standard'), forgiving: pinchTrace('forgiving') },
+      marginalFist: { standard: marginalFistTrace('standard'), forgiving: marginalFistTrace('forgiving') },
+      snap,
+    };
+  });
+
+  expect(r.selected.slice(0, 3)).toEqual(['standard', true, 'open']);
+  expect(r.selected[3]).toBeGreaterThan(0.95);
+  expect([r.accepted, r.rejected]).toEqual(['forgiving', 'standard']);
+  expect(r.reset).toEqual(['standard', true]);
+  expect(r.pinch.standard).toEqual([[false, false], [false, false], [true, true], [true, true]]);
+  expect(r.pinch.forgiving).toEqual(r.pinch.standard);
+  expect(r.marginalFist.standard).toEqual(['other', 'other', false, false]);
+  expect(r.marginalFist.forgiving).toEqual(['fist', 'fist', false, false]);
+  expect(r.snap.standard).toEqual({ clean: 1, fistOpen: 0, fistOpenBlur: 0 });
+  expect(r.snap.forgiving).toEqual(r.snap.standard);
+});
+
 test('snap detector: real sequences fire exactly when they should', async ({ page }) => {
   const r = await page.evaluate(async () => {
     const G = await import('/src/logic/gestures.js');

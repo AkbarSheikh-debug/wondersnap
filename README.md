@@ -96,6 +96,12 @@ Click a part to select it, drag to rotate.
 | **Vehicles (4)** | Sports car, Motorcycle, Airliner, Saturn V (with stage separation) |
 | **Machines (2)** | Mechanical wristwatch, EV battery pack (280 cells, busbars, cooling, BMS) |
 
+## Gesture sensitivity
+
+The **Gesture sensitivity** control in the status panel defaults to **Standard**, which preserves the original gesture
+thresholds. **More forgiving** slightly relaxes static hand-pose recognition and openness. Snap and pinch detection are
+unchanged, and the selection lasts only for the current page session.
+
 ## URL options
 
 | Option | Effect |
@@ -108,7 +114,7 @@ Click a part to select it, drag to rotate.
 
 ## Tests
 
-36 end-to-end and unit tests with [Playwright](https://playwright.dev/), driving the real app with synthetic hands on
+39 end-to-end and unit tests with [Playwright](https://playwright.dev/), driving the real app with synthetic hands on
 a deterministic clock.
 
 ```bash

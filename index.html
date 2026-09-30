@@ -35,6 +35,16 @@
       <div class="row">
         <span class="k">Hand</span><span id="posePill" class="pill pose">no hand</span>
       </div>
+      <div class="sensitivity">
+        <div class="sensitivity-head">
+          <label class="k" for="gestureSensitivity">Gesture sensitivity</label>
+          <select id="gestureSensitivity" aria-describedby="gestureSensitivityHint">
+            <option value="standard" selected>Standard</option>
+            <option value="forgiving">More forgiving</option>
+          </select>
+        </div>
+        <div id="gestureSensitivityHint" class="hint">More forgiving helps recognize less distinct hand poses.</div>
+      </div>
       <div class="meter">
         <div class="meter-head"><span class="k">Hand openness</span><b id="openPct">0%</b></div>
         <div class="bar"><i id="openBar"></i></div>
