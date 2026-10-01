@@ -1,5 +1,5 @@
 // Glue between hand landmarks and the state machine. Pure logic -> unit-testable with synthetic hands.
-import { classify, openness, pinched, PoseDebouncer, SnapDetector, NONE } from './gestures.js';
+import { classify, openness, pinched, PoseDebouncer, SnapDetector, GESTURE_PROFILES, STANDARD, NONE } from './gestures.js';
 import { WonderState } from './state.js';
 
 export class Controller {
@@ -7,6 +7,8 @@ export class Controller {
     this.state = new WonderState(n, isMachine);
     this.debounce = new PoseDebouncer(holdFrames);
     this.snap = new SnapDetector();
+    this.gestureSensitivity = 'standard';
+    this.gestureProfile = STANDARD;
     this.pose = NONE;
     this.rawPose = NONE;
     this.openness = 0;          // 0 fist .. 1 open (raw, per camera frame)
@@ -18,6 +20,13 @@ export class Controller {
     this.roll = 0;              // smoothed hand twist in the image plane, radians (0 = fingers up, + = clockwise)
     this.pinch = false; this.pinchStart = false; this._pinchN = 0;   // debounced pinch + rising edge
     this.second = null; this.secondT = -1e9; this.primaryWrist = null;   // optional second hand (two-hand zoom)
+  }
+
+  /** Select one of the bounded static-pose profiles. Unknown names safely restore Standard. */
+  setGestureSensitivity(name) {
+    this.gestureSensitivity = Object.hasOwn(GESTURE_PROFILES, name) ? name : 'standard';
+    this.gestureProfile = GESTURE_PROFILES[this.gestureSensitivity];
+    return this.gestureSensitivity;
   }
 
   /** All hands of one camera frame. The primary hand (gestures) is the one nearest the previous primary. */
@@ -41,7 +50,7 @@ export class Controller {
 
   /** Call once per camera frame (lm = 21 [x, y] pairs or null). Returns true if a snap fired. */
   onHand(lm, t) {
-    const raw = classify(lm);
+    const raw = classify(lm, this.gestureProfile);
     const [stable, changed] = this.debounce.update(raw);
     const snapped = this.snap.update(lm, t);
     this.rawPose = raw;
@@ -55,7 +64,7 @@ export class Controller {
       const r = Controller.rollOf(lm, this.aspect);
       if (t - this.lastHandT > 0.5) this.roll = r;                                     // hand just appeared
       else this.roll += Math.atan2(Math.sin(r - this.roll), Math.cos(r - this.roll)) * 0.5;   // light smoothing
-      this.openness = openness(lm);
+      this.openness = openness(lm, this.gestureProfile);
       this.handX = (lm[0][0] + lm[9][0]) / 2;
       this.handY = (lm[0][1] + lm[9][1]) / 2;
       this.lastHandT = t;

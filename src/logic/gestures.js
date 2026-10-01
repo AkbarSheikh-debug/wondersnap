@@ -4,15 +4,41 @@ export const WRIST = 0, THUMB_TIP = 4, MIDDLE_MCP = 9, MIDDLE_TIP = 12;
 export const TIPS = [8, 12, 16, 20], PIPS = [6, 10, 14, 18], MCPS = [5, 9, 13, 17];
 export const OPEN = 'open', FIST = 'fist', PEACE = 'peace', POINT = 'point', OTHER = 'other', NONE = 'none';
 
+export const STANDARD = Object.freeze({
+  extendedFingerRatio: 1.15,
+  curledFingerRatio: 1.25,
+  openThumbRatio: 1.1,
+  opennessFingerClosed: 1.05,
+  opennessFingerOpen: 1.75,
+  opennessThumbClosed: 0.9,
+  opennessThumbOpen: 1.55,
+});
+
+// A single 0.03 normalized-ratio tolerance admits mildly bent synthetic poses while keeping a broad
+// OTHER band between fist and open. Marginal tests sit halfway between the old and new boundaries,
+// and openness endpoints move inward by the same bounded amount instead of adding separate tuning.
+// Snap and pinch deliberately continue to use STANDARD internally.
+export const FORGIVING = Object.freeze({
+  extendedFingerRatio: 1.12,
+  curledFingerRatio: 1.28,
+  openThumbRatio: 1.07,
+  opennessFingerClosed: 1.08,
+  opennessFingerOpen: 1.72,
+  opennessThumbClosed: 0.93,
+  opennessThumbOpen: 1.52,
+});
+
+export const GESTURE_PROFILES = Object.freeze({ standard: STANDARD, forgiving: FORGIVING });
+
 const d = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
 export const handScale = (lm) => Math.max(d(lm[WRIST], lm[MIDDLE_MCP]), 1e-6);
 
 /** Instant pose. Finger extended = tip clearly farther from wrist than its PIP joint (rotation-invariant). */
-export function classify(lm) {
+export function classify(lm, profile = STANDARD) {
   if (!lm) return NONE;
-  const ext = TIPS.map((t, i) => d(lm[t], lm[WRIST]) > d(lm[PIPS[i]], lm[WRIST]) * 1.15);
-  const curled = TIPS.map((t, i) => d(lm[t], lm[WRIST]) < d(lm[MCPS[i]], lm[WRIST]) * 1.25);
-  const thumbOut = d(lm[THUMB_TIP], lm[17]) > handScale(lm) * 1.1;        // thumb tip far from pinky base
+  const ext = TIPS.map((t, i) => d(lm[t], lm[WRIST]) > d(lm[PIPS[i]], lm[WRIST]) * profile.extendedFingerRatio);
+  const curled = TIPS.map((t, i) => d(lm[t], lm[WRIST]) < d(lm[MCPS[i]], lm[WRIST]) * profile.curledFingerRatio);
+  const thumbOut = d(lm[THUMB_TIP], lm[17]) > handScale(lm) * profile.openThumbRatio;  // thumb tip far from pinky base
   if (ext.every(Boolean) && thumbOut) return OPEN;
   if (curled.every(Boolean)) return FIST;
   if (ext[0] && ext[1] && curled[2] && curled[3]) return PEACE;           // ✌ index + middle up
@@ -23,6 +49,7 @@ export function classify(lm) {
 /** Pinch: thumb tip touching the index tip (not a fist, where they are also close). */
 export function pinched(lm) {
   if (!lm) return false;
+  // Pinch safety is invariant across static-gesture sensitivity presets.
   return d(lm[THUMB_TIP], lm[8]) / handScale(lm) < 0.32 && classify(lm) !== FIST;
 }
 
@@ -30,14 +57,15 @@ export const middleExtended = (lm) => d(lm[MIDDLE_TIP], lm[WRIST]) > d(lm[10], l
 
 const clamp01 = (x) => Math.min(1, Math.max(0, x));
 /** How open the hand is, 0 = tight fist .. 1 = fully open (fingers 80 %, thumb 20 %). */
-export function openness(lm) {
+export function openness(lm, profile = STANDARD) {
   if (!lm) return 0;
   let f = 0;
   for (let i = 0; i < 4; i++) {
     const ratio = d(lm[TIPS[i]], lm[WRIST]) / Math.max(d(lm[MCPS[i]], lm[WRIST]), 1e-6);
-    f += clamp01((ratio - 1.05) / (1.75 - 1.05));
+    f += clamp01((ratio - profile.opennessFingerClosed) / (profile.opennessFingerOpen - profile.opennessFingerClosed));
   }
-  const thumb = clamp01((d(lm[THUMB_TIP], lm[17]) / handScale(lm) - 0.9) / (1.55 - 0.9));
+  const thumbRatio = d(lm[THUMB_TIP], lm[17]) / handScale(lm);
+  const thumb = clamp01((thumbRatio - profile.opennessThumbClosed) / (profile.opennessThumbOpen - profile.opennessThumbClosed));
   return 0.8 * (f / 4) + 0.2 * thumb;
 }
 
@@ -74,6 +102,7 @@ export class SnapDetector {
     const r = d(lm[THUMB_TIP], lm[MIDDLE_TIP]) / handScale(lm);
     if (r < this.close) {
       // a closed fist also brings thumb and middle tip together: that is not a snap "press"
+      // This intentionally uses classify()'s STANDARD default regardless of controller sensitivity.
       if (classify(lm) === FIST) this.pressedAt = null;
       else { this.pressedAt = t; this.hadDropout = false; }
       return false;

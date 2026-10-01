@@ -675,8 +675,11 @@ class App {
   bindInput() {
     const $ = this.$, ctl = this.ctl;
     const now = () => this.t;
+    const sensitivity = $('gestureSensitivity');
+    sensitivity.value = ctl.gestureSensitivity;
+    sensitivity.addEventListener('change', () => { sensitivity.value = ctl.setGestureSensitivity(sensitivity.value); });
     addEventListener('keydown', (e) => {
-      if (e.target instanceof HTMLInputElement && e.target.type !== 'range') return;
+      if ((e.target instanceof HTMLInputElement && e.target.type !== 'range') || e.target instanceof HTMLSelectElement) return;
       const k = e.key.toLowerCase(), st = ctl.state;
       if (k !== 'd') this.stopDemo();
       if (k === ' ') { e.preventDefault(); ctl.keySnap(now()); }
@@ -830,7 +833,8 @@ function boot() {
       const st = app.ctl.state, L = app.model?.labels || [], q = app.quiz;
       return {
         state: st.state, index: st.index, name: CATALOG[st.index].name, kind: CATALOG[st.index].kind, category: CATALOG[st.index].category, uploaded: app.uploaded,
-        pose: app.ctl.pose, rawPose: app.ctl.rawPose, pinch: app.ctl.pinch, openness: app.ctl.openness, explode: app.explode, scale: app.scale,
+        pose: app.ctl.pose, rawPose: app.ctl.rawPose, pinch: app.ctl.pinch, openness: app.ctl.openness,
+        gestureSensitivity: app.ctl.gestureSensitivity, explode: app.explode, scale: app.scale,
         yaw: app.spin + app.dragYaw, pitch: app.pitch, handRotating: app.handRotating, roll: app.ctl.roll,
         zoom: app.zoom, twoHands: app.ctl.secondVisible(app.t), pulse: app.pulse, flow: app.flow,
         selected: app.sel >= 0 ? L[app.sel]?.label : null, pulled: app.pulled, pullAmt: app.pullAmt, pointing: !!app.pointer,

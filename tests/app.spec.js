@@ -5,6 +5,20 @@ import { openApp, shot, status, cloud, play, snap, indexOf, watchErrors } from '
 
 test.describe.configure({ mode: 'serial' });
 
+async function playMarginalFist(page) {
+  await page.evaluate(async () => {
+    const G = await import('/src/logic/gestures.js');
+    const W = window.wonderSnap, dist = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1]);
+    const lm = G.TIPS.reduce((cur, tip, i) => {
+      const q = cur.map((p) => [...p]), wrist = q[G.WRIST], p = q[tip];
+      const target = dist(q[G.MCPS[i]], wrist) * 1.265, current = Math.max(dist(p, wrist), 1e-9);
+      q[tip] = [wrist[0] + ((p[0] - wrist[0]) * target) / current, wrist[1] + ((p[1] - wrist[1]) * target) / current];
+      return q;
+    }, W.synth({ cx: 0.33, cy: 0.58, s: 0.085, pose: 'fist' }));
+    await W.advance(0.3, lm);
+  });
+}
+
 test('01 start screen, then keyboard-only mode (real-time loop)', async ({ page }) => {
   const noErrors = watchErrors(page);
   await page.goto('/?n=200000');
@@ -24,6 +38,54 @@ test('01 start screen, then keyboard-only mode (real-time loop)', async ({ page 
   expect(s.state).toBe('formed');
   expect(s.fps).toBeGreaterThan(20);
   await shot(page, '01c-realtime-turtle-tower');
+  noErrors();
+});
+
+test('gesture sensitivity selector applies static presets live without changing snap or pinch', async ({ page }) => {
+  const noErrors = watchErrors(page);
+  await openApp(page);
+  const select = page.getByLabel('Gesture sensitivity');
+  await expect(select).toHaveValue('standard');
+  await expect(select.locator('option')).toHaveText(['Standard', 'More forgiving']);
+  expect((await status(page)).gestureSensitivity).toBe('standard');
+  expect(await page.evaluate(async () => {
+    const { STANDARD } = await import('/src/logic/gestures.js');
+    return window.wonderSnap.app.ctl.gestureProfile === STANDARD;
+  })).toBe(true);
+
+  await playMarginalFist(page);
+  let s = await status(page);
+  expect([s.gestureSensitivity, s.rawPose, s.pose, s.state]).toEqual(['standard', 'other', 'other', 'idle']);
+  await page.keyboard.press('Space');
+  expect((await status(page)).state).toBe('sphere');
+
+  await select.selectOption('forgiving');
+  await expect(select).toHaveValue('forgiving');
+  expect((await status(page)).gestureSensitivity).toBe('forgiving');
+  await playMarginalFist(page);
+  s = await status(page);
+  expect([s.rawPose, s.pose, s.state, s.pinch]).toEqual(['fist', 'fist', 'formed', false]);
+
+  await select.selectOption('standard');
+  await expect(select).toHaveValue('standard');
+  await playMarginalFist(page);
+  s = await status(page);
+  expect([s.gestureSensitivity, s.rawPose, s.pose, s.pinch]).toEqual(['standard', 'other', 'other', false]);
+
+  await play(page, 0.15, { pose: 'pinch' });
+  expect((await status(page)).pinch).toBe(true);
+  await play(page, 0.15, null);
+  await select.selectOption('forgiving');
+  await play(page, 0.15, { pose: 'pinch' });
+  expect((await status(page)).pinch).toBe(true);
+  await play(page, 0.15, null);
+
+  await snap(page);
+  expect((await status(page)).state).toBe('dissolve');
+  await play(page, 1.3, null);
+  await select.selectOption('standard');
+  await snap(page);
+  expect((await status(page)).state).toBe('sphere');
   noErrors();
 });
 
