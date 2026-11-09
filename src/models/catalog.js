@@ -8,6 +8,7 @@ import { ANATOMY2 } from './anatomy2.js';
 import { BODY } from './body.js';
 import { BIOLOGY } from './biology.js';
 import { VEHICLES2, MACHINES } from './machines.js';
+import { GEOLOGY } from './geology.js'; // <--- 1. ADD THIS IMPORT
 import { makeRng } from '../lib/rng.js';
 import { build, flatten, allocate, shuffleIndex, normalize } from '../lib/sampling.js';
 
@@ -18,6 +19,7 @@ export const CATALOG = [
   ...ENGINES.map((e) => ({ ...e, kind: 'machine', category: 'Engines' })),
   ...[...VEHICLES, ...VEHICLES2].map((v) => ({ ...v, kind: 'machine', category: 'Vehicles' })),
   ...MACHINES.map((m) => ({ ...m, kind: 'machine', category: 'Machines' })),
+  ...GEOLOGY.map((g) => ({ ...g, kind: 'machine', category: 'Geology' })), // <--- 2. ADD THIS LINE
 ];
 
 export const isMachine = (i) => CATALOG[i]?.kind === 'machine';
